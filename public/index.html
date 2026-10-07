@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GuardianPay — AI scam shield for seniors</title>
+<style>
+  :root { --ink:#1c2b3a; --bg:#f4f7fb; --card:#fff; --accent:#0a7cff; --danger:#d92d20; --warn:#b54708; --ok:#067647; }
+  * { box-sizing:border-box; }
+  body { font-family: Georgia, 'Times New Roman', serif; background:var(--bg); color:var(--ink); margin:0; padding:0; font-size:20px; line-height:1.5; }
+  header { background:#0b1f33; color:#fff; padding:28px 24px; text-align:center; }
+  header h1 { margin:0; font-size:34px; letter-spacing:.5px; }
+  header p { margin:8px 0 0; opacity:.85; font-size:19px; }
+  .wrap { max-width:960px; margin:0 auto; padding:24px; }
+  .tabs { display:flex; gap:12px; margin:20px 0 28px; flex-wrap:wrap; }
+  .tab { flex:1; min-width:220px; padding:16px; border:2px solid #d0d9e4; border-radius:14px; background:var(--card); cursor:pointer; text-align:center; font-size:19px; }
+  .tab.active { border-color:var(--accent); box-shadow:0 0 0 3px rgba(10,124,255,.15); }
+  .tab small { display:block; color:#5b6b7f; margin-top:6px; font-size:15px; }
+  .card { background:var(--card); border-radius:16px; padding:32px; box-shadow:0 2px 12px rgba(11,31,51,.08); margin-bottom:24px; }
+  .narrative { font-style:italic; color:#3d4f63; border-left:4px solid var(--accent); padding-left:18px; margin:0 0 24px; }
+  .invoice { border:2px dashed #9db2c9; border-radius:12px; padding:24px; margin-bottom:24px; }
+  .invoice .from { color:#5b6b7f; font-size:17px; }
+  .invoice .amount { font-size:52px; font-weight:bold; margin:8px 0; }
+  .invoice .note { background:#f8fafc; border-radius:8px; padding:16px; font-size:18px; }
+  .btn { display:inline-block; background:var(--accent); color:#fff; border:none; border-radius:12px; padding:18px 44px; font-size:22px; cursor:pointer; font-family:inherit; }
+  .btn:disabled { opacity:.5; cursor:default; }
+  .btn.ghost { background:#e8eef6; color:var(--ink); }
+  .signal { border:1px solid #dfe7f1; border-radius:12px; padding:18px 20px; margin-bottom:14px; opacity:0; transform:translateY(8px); transition:all .5s; }
+  .signal.show { opacity:1; transform:none; }
+  .signal .head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .signal .name { font-weight:bold; font-size:20px; }
+  .signal .bar { height:10px; background:#e8eef6; border-radius:6px; margin:12px 0; overflow:hidden; }
+  .signal .bar i { display:block; height:100%; border-radius:6px; }
+  .signal .finding { font-size:18px; }
+  .signal .sim { display:inline-block; font-size:13px; background:#fff3cd; border:1px solid #e6c200; border-radius:6px; padding:2px 8px; margin-left:8px; vertical-align:middle; font-family:Arial,sans-serif; }
+  .verdict { border-radius:14px; padding:28px; font-size:22px; margin:24px 0; display:none; }
+  .verdict.show { display:block; }
+  .verdict.HOLD { background:#fffaeb; border:2px solid #fedf89; }
+  .verdict.BLOCK { background:#fef3f2; border:2px solid #fecdca; }
+  .verdict.APPROVE { background:#ecfdf3; border:2px solid #a6f4c5; }
+  .verdict h2 { margin:0 0 10px; font-size:30px; }
+  .score { font-size:18px; color:#5b6b7f; }
+  .sms { max-width:420px; margin:0 auto; background:#0b1f33; border-radius:28px; padding:28px 20px; color:#fff; }
+  .sms .bubble { background:#1d344e; border-radius:16px; padding:16px 18px; margin-bottom:12px; font-size:17px; font-family:Arial,sans-serif; }
+  .sms .bubble.me { background:var(--accent); margin-left:40px; }
+  .sms .label { text-align:center; font-size:14px; opacity:.7; margin-bottom:14px; font-family:Arial,sans-serif; }
+  .stepnav { display:flex; gap:12px; margin-top:24px; }
+  .hidden { display:none !important; }
+  .spinner { text-align:center; padding:40px; font-size:22px; color:#5b6b7f; }
+  footer { text-align:center; color:#8a99ad; font-size:15px; padding:24px; font-family:Arial,sans-serif; }
+  .badge-sim { font-family:Arial,sans-serif; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ GuardianPay</h1>
+  <p>An AI scam-shield for the people scammers target most — built on PayPal</p>
+</header>
+
+<div class="wrap">
+  <div class="tabs" id="tabs"></div>
+
+  <div id="stage"></div>
+
+  <footer>PayPal AI Hackathon 2026 · “Build What’s Next” · All payments via PayPal Sandbox · Image reverse-search is <b>simulated</b> in this MVP</footer>
+</div>
+
+<script>
+const state = { scenario: null, analysis: null };
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+async function init() {
+  const scenarios = await api('/api/scenarios');
+  const tabs = document.getElementById('tabs');
+  tabs.innerHTML = '';
+  scenarios.forEach((s, i) => {
+    const d = document.createElement('div');
+    d.className = 'tab' + (i === 0 ? ' active' : '');
+    d.innerHTML = `<b>${s.demoTitle}</b><small>${s.narrative.slice(0, 90)}…</small>`;
+    d.onclick = () => {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      d.classList.add('active');
+      loadScenario(s.id);
+    };
+    tabs.appendChild(d);
+  });
+  loadScenario(scenarios[0].id);
+}
+
+async function loadScenario(id) {
+  state.scenario = await api('/api/scenario/' + id);
+  state.analysis = null;
+  renderPayScreen();
+}
+
+function renderPayScreen() {
+  const s = state.scenario, p = s.payment;
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `
+    <div class="card">
+      <p class="narrative">${s.narrative}</p>
+      <h2 style="margin-top:0">Hello, Margaret 👋</h2>
+      <p>You’ve received a payment request:</p>
+      <div class="invoice">
+        <div class="from">From: <b>${p.recipientName}</b> &lt;${p.recipientEmail}&gt;</div>
+        <div class="amount">$${p.amount} ${p.currency || 'CAD'}</div>
+        <div class="note">“${p.memo || p.invoiceNote || ''}”</div>
+      </div>
+      <button class="btn" id="payBtn">Pay $${p.amount}</button>
+      <p style="color:#5b6b7f;font-size:17px;margin-top:16px">🔒 Protected by GuardianPay — every payment is checked by AI first.</p>
+    </div>`;
+  document.getElementById('payBtn').onclick = runAnalysis;
+}
+
+async function runAnalysis() {
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `<div class="card"><div class="spinner">🛡️ GuardianPay AI is examining this payment…<br><small>checking recipient, amounts, messages, and behavior</small></div></div>`;
+  const btn = document.querySelector('.spinner');
+  try {
+    state.analysis = await api('/api/analyze', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scenarioId: state.scenario.id }),
+    });
+  } catch (e) {
+    stage.innerHTML = `<div class="card"><p>Analysis failed: ${e.message}</p><button class="btn ghost" onclick="loadScenario(state.scenario.id)">Back</button></div>`;
+    return;
+  }
+  renderEvidence();
+}
+
+function barColor(score) { return score >= 70 ? '#d92d20' : score >= 30 ? '#dc6803' : '#067647'; }
+
+function renderEvidence() {
+  const a = state.analysis, p = state.scenario.payment;
+  const stage = document.getElementById('stage');
+  stage.innerHTML = `
+    <div class="card">
+      <h2 style="margin-top:0">🔍 What the AI found</h2>
+      <p class="score">Overall risk score: <b>${a.score}/100</b> · Text analysis mode: <b>${signalMode()}</b></p>
+      <div id="signals"></div>
+      <div class="verdict ${a.verdict}" id="verdictBox">
+        <h2>${a.verdict === 'APPROVE' ? '✅ Payment approved' : a.verdict === 'HOLD' ? '⏸️ Payment held — 24 hours' : '⛔ Payment blocked'}</h2>
+        <p>${a.summary}</p>
+        <p><b>Recommended:</b> ${a.recommendedAction}</p>
+      </div>
+      <div class="stepnav">
+        <button class="btn ghost" onclick="loadScenario(state.scenario.id)">↩ Try again</button>
+        ${a.verdict !== 'APPROVE' ? '<button class="btn" id="contactBtn">📱 See what Tom receives</button>' : ''}
+      </div>
+    </div>
+    <div class="card hidden" id="contactCard">
+      <h2 style="margin-top:0">📱 Trusted contact alert <span style="font-size:15px;color:#5b6b7f">(SMS mock — production swaps in Twilio)</span></h2>
+      <div class="sms">
+        <div class="label">Text message · to ${a.contact.name} (${a.contact.phone}) · just now</div>
+        <div class="bubble">🛡️ <b>GuardianPay alert:</b> your mom just tried to pay <b>$${p.amount}</b> to <b>${p.recipientName}</b> — flagged as a likely scam (risk ${a.score}/100). Payment is on hold for 24h. Nothing has left her account.</div>
+        <div class="bubble">Top signals: ${a.signals.slice().sort((x, y) => y.score - x.score).slice(0, 2).map(s => s.name).join(' · ')}</div>
+        <div class="bubble">Reply <b>RELEASE</b> if legitimate, or tap to review the evidence with her: guardianpay.example/review</div>
+        <div class="bubble me">Thanks — looking now 👀</div>
+      </div>
+    </div>`;
+
+  const box = document.getElementById('signals');
+  a.signals.forEach((sg, i) => {
+    const el = document.createElement('div');
+    el.className = 'signal';
+    el.innerHTML = `
+      <div class="head"><span class="name">${sg.name}${sg.simulated ? '<span class="sim badge-sim">SIMULATED</span>' : ''}</span><span><b>${sg.score}</b>/100</span></div>
+      <div class="bar"><i style="width:${sg.score}%;background:${barColor(sg.score)}"></i></div>
+      <div class="finding">${sg.finding}</div>`;
+    box.appendChild(el);
+    setTimeout(() => el.classList.add('show'), 450 * (i + 1));
+  });
+  setTimeout(() => document.getElementById('verdictBox').classList.add('show'), 450 * (a.signals.length + 1));
+
+  const cb = document.getElementById('contactBtn');
+  if (cb) cb.onclick = () => {
+    const c = document.getElementById('contactCard');
+    c.classList.remove('hidden');
+    c.scrollIntoView({ behavior: 'smooth' });
+  };
+}
+
+function signalMode() {
+  const t = (state.analysis.signals || []).find(s => s.id === 'text_analysis');
+  return (t && t.detail && t.detail.mode) || 'heuristic';
+}
+
+init();
+</script>
+</body>
+</html>
