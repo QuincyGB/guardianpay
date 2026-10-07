@@ -18,6 +18,7 @@ const path = require('path');
 const fs = require('fs');
 const { analyze } = require('./lib/riskEngine');
 const paypal = require('./lib/paypal');
+const sms = require('./lib/sms');
 
 const app = express();
 app.use(express.json());
@@ -55,6 +56,53 @@ app.post('/api/analyze', async (req, res) => {
     }
     const result = await analyze(payment, context);
     res.json({ ...result, contact: demoData.contact, senior: demoData.senior.name });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ---- Trusted-contact SMS alerts (REAL Twilio when configured, else mock) ----
+app.get('/api/sms/status', (req, res) => {
+  res.json({
+    configured: sms.configured(),
+    mode: sms.configured() ? 'real' : 'mock',
+    hint: sms.configured()
+      ? 'Twilio credentials detected — alerts send real SMS.'
+      : 'Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER for real SMS. Demo uses a UI mock.',
+  });
+});
+
+/**
+ * POST /api/alert { scenarioId } or { payment, context }
+ * Re-runs analysis; if the verdict is HOLD or BLOCK, sends the trusted-contact
+ * alert (real SMS via Twilio when configured, mock otherwise).
+ */
+app.post('/api/alert', async (req, res) => {
+  try {
+    let payment, context;
+    if (req.body.scenarioId) {
+      const s = demoData.scenarios[req.body.scenarioId];
+      if (!s) return res.status(404).json({ error: 'unknown scenario' });
+      context = { ...s.context, charityRegistry: demoData.charityRegistry };
+      payment = s.payment;
+    } else if (req.body.payment) {
+      payment = req.body.payment;
+      context = { ...(req.body.context || {}), charityRegistry: demoData.charityRegistry };
+    } else {
+      return res.status(400).json({ error: 'provide scenarioId or payment' });
+    }
+    const result = await analyze(payment, context);
+    if (result.verdict === 'APPROVE') {
+      return res.json({ sent: false, verdict: 'APPROVE', reason: 'no alert needed for approved payments' });
+    }
+    const alert = await sms.sendAlert({
+      to: demoData.contact.phone,
+      seniorName: demoData.senior.name,
+      contactName: demoData.contact.name,
+      payment, verdict: result.verdict, score: result.score, signals: result.signals,
+    });
+    res.json({ sent: !alert.error, verdict: result.verdict, score: result.score, alert });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message });

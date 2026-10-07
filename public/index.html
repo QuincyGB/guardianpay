@@ -62,7 +62,7 @@
 
   <div id="stage"></div>
 
-  <footer>PayPal AI Hackathon 2026 · “Build What’s Next” · All payments via PayPal Sandbox · Image reverse-search is <b>simulated</b> in this MVP</footer>
+  <footer>PayPal AI Hackathon 2026 · “Build What’s Next” · All payments via PayPal Sandbox · Image reverse-search is <b>simulated</b> · SMS is a demo mock unless <b>TWILIO_*</b> is configured</footer>
 </div>
 
 <script>
@@ -135,13 +135,13 @@ async function runAnalysis() {
 
 function barColor(score) { return score >= 70 ? '#d92d20' : score >= 30 ? '#dc6803' : '#067647'; }
 
-function renderEvidence() {
+async function renderEvidence() {
   const a = state.analysis, p = state.scenario.payment;
   const stage = document.getElementById('stage');
   stage.innerHTML = `
     <div class="card">
       <h2 style="margin-top:0">🔍 What the AI found</h2>
-      <p class="score">Overall risk score: <b>${a.score}/100</b> · Text analysis mode: <b>${signalMode()}</b></p>
+      <p class="score">Overall risk score: <b><span id="scoreNum">0</span>/100</b> · Text analysis mode: <b>${signalMode()}</b></p>
       <div id="signals"></div>
       <div class="verdict ${a.verdict}" id="verdictBox">
         <h2>${a.verdict === 'APPROVE' ? '✅ Payment approved' : a.verdict === 'HOLD' ? '⏸️ Payment held — 24 hours' : '⛔ Payment blocked'}</h2>
@@ -149,19 +149,13 @@ function renderEvidence() {
         <p><b>Recommended:</b> ${a.recommendedAction}</p>
       </div>
       <div class="stepnav">
-        <button class="btn ghost" onclick="loadScenario(state.scenario.id)">↩ Try again</button>
+        <button class="btn ghost" onclick="resetDemo()">🔄 Reset demo</button>
         ${a.verdict !== 'APPROVE' ? '<button class="btn" id="contactBtn">📱 See what Tom receives</button>' : ''}
       </div>
     </div>
     <div class="card hidden" id="contactCard">
-      <h2 style="margin-top:0">📱 Trusted contact alert <span style="font-size:15px;color:#5b6b7f">(SMS mock — production swaps in Twilio)</span></h2>
-      <div class="sms">
-        <div class="label">Text message · to ${a.contact.name} (${a.contact.phone}) · just now</div>
-        <div class="bubble">🛡️ <b>GuardianPay alert:</b> your mom just tried to pay <b>$${p.amount}</b> to <b>${p.recipientName}</b> — flagged as a likely scam (risk ${a.score}/100). Payment is on hold for 24h. Nothing has left her account.</div>
-        <div class="bubble">Top signals: ${a.signals.slice().sort((x, y) => y.score - x.score).slice(0, 2).map(s => s.name).join(' · ')}</div>
-        <div class="bubble">Reply <b>RELEASE</b> if legitimate, or tap to review the evidence with her: guardianpay.example/review</div>
-        <div class="bubble me">Thanks — looking now 👀</div>
-      </div>
+      <h2 style="margin-top:0">📱 Trusted contact alert <span id="smsModeLabel" style="font-size:15px;color:#5b6b7f"></span></h2>
+      <div id="smsBody"><div class="spinner">Checking alert channel…</div></div>
     </div>`;
 
   const box = document.getElementById('signals');
@@ -175,14 +169,82 @@ function renderEvidence() {
     box.appendChild(el);
     setTimeout(() => el.classList.add('show'), 450 * (i + 1));
   });
-  setTimeout(() => document.getElementById('verdictBox').classList.add('show'), 450 * (a.signals.length + 1));
+
+  // Cinematic finish: score counts up, then the verdict drops in.
+  const signalMs = 450 * (a.signals.length + 1);
+  setTimeout(() => {
+    countUp(document.getElementById('scoreNum'), a.score, 1200);
+    setTimeout(() => document.getElementById('verdictBox').classList.add('show'), 1350);
+  }, signalMs);
 
   const cb = document.getElementById('contactBtn');
   if (cb) cb.onclick = () => {
     const c = document.getElementById('contactCard');
     c.classList.remove('hidden');
     c.scrollIntoView({ behavior: 'smooth' });
+    renderContactCard();
   };
+}
+
+/** Animate a number 0 → target over `ms`. */
+function countUp(el, target, ms) {
+  if (!el) return;
+  const t0 = performance.now();
+  (function tick(t) {
+    const k = Math.min(1, (t - t0) / ms);
+    el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3)));
+    if (k < 1) requestAnimationFrame(tick);
+  })(t0);
+}
+
+function resetDemo() {
+  loadScenario(state.scenario.id);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+/** Contact card: real Twilio button when configured, otherwise the labeled mock. */
+async function renderContactCard() {
+  const a = state.analysis, p = state.scenario.payment;
+  const body = document.getElementById('smsBody');
+  const label = document.getElementById('smsModeLabel');
+  let status = { mode: 'mock' };
+  try { status = await api('/api/sms/status'); } catch (e) { /* stay mock */ }
+
+  if (status.mode === 'real') {
+    label.textContent = '(live — sends a real SMS via Twilio)';
+    body.innerHTML = `
+      <p>Twilio is connected. Send the real alert to ${a.contact.name} (${a.contact.phone}):</p>
+      <button class="btn" id="sendSmsBtn">📲 Send real SMS alert</button>
+      <div id="smsResult" style="margin-top:16px"></div>`;
+    document.getElementById('sendSmsBtn').onclick = async () => {
+      const btn = document.getElementById('sendSmsBtn');
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        const r = await api('/api/alert', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scenarioId: state.scenario.id }),
+        });
+        document.getElementById('smsResult').innerHTML = r.sent
+          ? `<p>✅ SMS sent via Twilio (sid <code>${r.alert.sid || 'n/a'}</code>) to ${r.alert.to}.</p>`
+          : `<p>⚠️ Not sent: ${r.alert && r.alert.error ? r.alert.error : r.reason || 'unknown'}</p>`;
+      } catch (e) {
+        document.getElementById('smsResult').innerHTML = `<p>⚠️ Send failed: ${e.message}</p>`;
+      }
+      btn.textContent = '📲 Send real SMS alert';
+      btn.disabled = false;
+    };
+  } else {
+    label.textContent = '(demo mock — set TWILIO_* env vars for real SMS)';
+    body.innerHTML = `
+      <div class="sms">
+        <div class="label">Text message · to ${a.contact.name} (${a.contact.phone}) · just now</div>
+        <div class="bubble">🛡️ <b>GuardianPay alert:</b> your mom just tried to pay <b>$${p.amount}</b> to <b>${p.recipientName}</b> — flagged as a likely scam (risk ${a.score}/100). Payment is on hold for 24h. Nothing has left her account.</div>
+        <div class="bubble">Top signals: ${a.signals.slice().sort((x, y) => y.score - x.score).slice(0, 2).map(s => s.name).join(' · ')}</div>
+        <div class="bubble">Reply <b>RELEASE</b> if legitimate, or tap to review the evidence with her: guardianpay.example/review</div>
+        <div class="bubble me">Thanks — looking now 👀</div>
+      </div>`;
+  }
 }
 
 function signalMode() {
