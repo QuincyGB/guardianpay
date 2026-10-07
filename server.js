@@ -13,6 +13,7 @@
  *   POST /api/webhooks/paypal       -> PayPal webhook receiver (logs events, verifies signature when configured)
  */
 
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
